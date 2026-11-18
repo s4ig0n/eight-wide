@@ -82,14 +82,39 @@ the smaller caches and the strided naive kernel degrades most sharply.
 ## Cache simulation
 
 `tools/cache_sim.py` models exact LRU replacement in 8-way L1D and L2 caches,
-with 64-byte cache lines and write allocation. It traces abstract addresses for
-all three matrices; it is deliberately small and transparent rather than a
-cycle-accurate CPU model.
+with 64-byte cache lines and write allocation. It also exports the same abstract
+matrix addresses as Valgrind-compatible traces for the separately validated
+C++ [Cache Simulator](https://github.com/s4ig0n/Cache-Simulator), tying the two
+projects together instead of treating the Python model as an independent
+source of truth.
 
 ```sh
 python tools/cache_sim.py --size 128
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
+
+To replay both loop orders through the C++ simulator, generate smaller traces
+and point `cachesim` at them (the example uses an 8 KiB L1 to make the locality
+difference visible at N=64):
+
+```sh
+python tools/cache_sim.py --size 64 --l1-kib 8 --trace-dir build/traces
+cachesim -s 8K -b 64 -a 8 --l2-size 256K build/traces/naive_ijk.trace
+cachesim -s 8K -b 64 -a 8 --l2-size 256K build/traces/cache_friendly_ikj.trace
+```
+
+The C++ simulator reports exactly the same L1 miss counts as the Python model:
+
+| N=64, 8 KiB L1 | accesses | L1 misses | L1 miss rate | L2 misses | AMAT |
+|---|---:|---:|---:|---:|---:|
+| naive `ijk` | 528,384 | 270,592 | 51.21% | 768 | 10.29 cycles |
+| cache-friendly `ikj` | 794,624 | 16,896 | 2.13% | 768 | 4.35 cycles |
+
+The `ikj` trace contains more explicit accesses because every accumulation is
+represented as a load and a store to `C`; despite that, it cuts L1 misses by
+93.8% and modeled AMAT by 57.7%. The C++ simulator has been validated against
+Cachegrind to within 0.06%, so these cross-project results are the stronger
+check on the explanatory Python model.
 
 The expected result is far fewer L1 misses for `ikj`, especially for `B`:
 `ijk` steps down a column with an `N * 4` byte stride, while `ikj` streams along
@@ -124,7 +149,7 @@ src/matmul_scalar.c    scalar cache-friendly implementation
 src/matmul_avx2.c      AVX2/FMA implementation
 src/matmul_blocked_avx2.c  cache-blocked AVX2/FMA implementation
 src/benchmark.c        timing, validation, CSV output
-tools/cache_sim.py     two-level set-associative cache model
+tools/cache_sim.py     cache model and C++ simulator trace exporter
 tests/                 native correctness and simulator tests
 ```
 

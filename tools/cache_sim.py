@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import collections
 import dataclasses
+import pathlib
 from typing import DefaultDict
 
 
@@ -44,14 +45,17 @@ class Cache:
 
 
 class Hierarchy:
-    def __init__(self, l1: CacheConfig, l2: CacheConfig) -> None:
+    def __init__(self, l1: CacheConfig, l2: CacheConfig, trace=None) -> None:
         self.l1 = Cache(l1)
         self.l2 = Cache(l2)
+        self.trace = trace
         self.accesses: DefaultDict[str, int] = collections.defaultdict(int)
         self.l1_misses: DefaultDict[str, int] = collections.defaultdict(int)
         self.l2_misses: DefaultDict[str, int] = collections.defaultdict(int)
 
-    def access(self, label: str, address: int) -> None:
+    def access(self, label: str, address: int, is_write: bool = False) -> None:
+        if self.trace is not None:
+            self.trace.write(f" {'S' if is_write else 'L'} {address:x},4\n")
         self.accesses[label] += 1
         if self.l1.access(address):
             return
@@ -64,32 +68,45 @@ def matrix_address(base: int, n: int, row: int, column: int) -> int:
     return base + (row * n + column) * 4
 
 
-def simulate(n: int, order: str, l1_size: int, l2_size: int) -> Hierarchy:
+def simulate(
+    n: int,
+    order: str,
+    l1_size: int,
+    l2_size: int,
+    trace_path: pathlib.Path | None = None,
+) -> Hierarchy:
+    trace = trace_path.open("w", encoding="ascii", newline="\n") if trace_path else None
     hierarchy = Hierarchy(
         CacheConfig("L1D", l1_size, ways=8),
         CacheConfig("L2", l2_size, ways=8),
+        trace,
     )
     # Large, non-overlapping, line-aligned virtual regions avoid accidental aliasing.
     a_base, b_base, c_base = 0x10000000, 0x20000000, 0x30000000
 
-    if order == "ijk":
-        for i in range(n):
-            for j in range(n):
+    try:
+        if order == "ijk":
+            for i in range(n):
+                for j in range(n):
+                    for k in range(n):
+                        hierarchy.access("A", matrix_address(a_base, n, i, k))
+                        hierarchy.access("B", matrix_address(b_base, n, k, j))
+                    hierarchy.access("C", matrix_address(c_base, n, i, j), is_write=True)
+        elif order == "ikj":
+            for i in range(n):
+                for j in range(n):
+                    hierarchy.access("C", matrix_address(c_base, n, i, j), is_write=True)
                 for k in range(n):
                     hierarchy.access("A", matrix_address(a_base, n, i, k))
-                    hierarchy.access("B", matrix_address(b_base, n, k, j))
-                hierarchy.access("C", matrix_address(c_base, n, i, j))
-    elif order == "ikj":
-        for i in range(n):
-            for j in range(n):
-                hierarchy.access("C", matrix_address(c_base, n, i, j))
-            for k in range(n):
-                hierarchy.access("A", matrix_address(a_base, n, i, k))
-                for j in range(n):
-                    hierarchy.access("B", matrix_address(b_base, n, k, j))
-                    hierarchy.access("C", matrix_address(c_base, n, i, j))
-    else:
-        raise ValueError(f"unsupported loop order: {order}")
+                    for j in range(n):
+                        hierarchy.access("B", matrix_address(b_base, n, k, j))
+                        hierarchy.access("C", matrix_address(c_base, n, i, j))
+                        hierarchy.access("C", matrix_address(c_base, n, i, j), is_write=True)
+        else:
+            raise ValueError(f"unsupported loop order: {order}")
+    finally:
+        if trace is not None:
+            trace.close()
     return hierarchy
 
 
@@ -118,14 +135,32 @@ def main() -> None:
     parser.add_argument("--size", type=int, default=128, help="matrix dimension (default: 128)")
     parser.add_argument("--l1-kib", type=int, default=32, help="8-way L1D size in KiB")
     parser.add_argument("--l2-kib", type=int, default=256, help="8-way L2 size in KiB")
+    parser.add_argument(
+        "--trace-dir",
+        type=pathlib.Path,
+        help="also write Valgrind-compatible traces for the C++ Cache Simulator",
+    )
     args = parser.parse_args()
     if args.size <= 0 or args.l1_kib <= 0 or args.l2_kib <= 0:
         parser.error("all sizes must be positive")
 
+    if args.trace_dir:
+        args.trace_dir.mkdir(parents=True, exist_ok=True)
+
     configs = {
-        "naive ijk": simulate(args.size, "ijk", args.l1_kib * 1024, args.l2_kib * 1024),
+        "naive ijk": simulate(
+            args.size,
+            "ijk",
+            args.l1_kib * 1024,
+            args.l2_kib * 1024,
+            args.trace_dir / "naive_ijk.trace" if args.trace_dir else None,
+        ),
         "cache-friendly ikj (scalar and AVX2)": simulate(
-            args.size, "ikj", args.l1_kib * 1024, args.l2_kib * 1024
+            args.size,
+            "ikj",
+            args.l1_kib * 1024,
+            args.l2_kib * 1024,
+            args.trace_dir / "cache_friendly_ikj.trace" if args.trace_dir else None,
         ),
     }
     print(
@@ -140,6 +175,8 @@ def main() -> None:
     friendly = total(configs["cache-friendly ikj (scalar and AVX2)"].l1_misses)
     print(f"ikj reduces modeled L1 misses by {100.0 * (naive - friendly) / naive:.1f}%.")
     print("Scalar ikj and AVX2 share this access pattern; their remaining gap is SIMD throughput.")
+    if args.trace_dir:
+        print(f"Wrote C++ Cache Simulator traces to {args.trace_dir}.")
 
 
 if __name__ == "__main__":

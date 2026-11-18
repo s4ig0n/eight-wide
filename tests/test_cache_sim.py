@@ -1,5 +1,6 @@
 import pathlib
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
@@ -23,6 +24,15 @@ class CacheTests(unittest.TestCase):
         friendly = simulate(32, "ikj", 2 * 1024, 16 * 1024)
         self.assertLess(total(friendly.l1_misses), total(naive.l1_misses))
         self.assertLess(friendly.l1_misses["B"], naive.l1_misses["B"])
+
+    def test_writes_valgrind_compatible_trace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "tiny.trace"
+            simulate(2, "ijk", 1024, 4096, path)
+            lines = path.read_text(encoding="ascii").splitlines()
+        self.assertTrue(lines[0].startswith(" L "))
+        self.assertIn(",4", lines[0])
+        self.assertTrue(any(line.startswith(" S ") for line in lines))
 
 
 if __name__ == "__main__":
