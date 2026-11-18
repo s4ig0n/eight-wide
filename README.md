@@ -57,7 +57,7 @@ observable.
 Floating-point accumulation order differs between `ijk`, `ikj`, and FMA, so
 the results are compared with a size-scaled tolerance rather than bitwise.
 
-### Measured result
+### Results
 
 Release build measured on an Intel64 Family 6 Model 154 host with Clang 20.1.2
 on 2026-11-18. Each entry is the best of five runs except N=1024 (best of
@@ -109,14 +109,6 @@ follow-up measurement is:
 perf stat -e cycles,instructions,cache-references,cache-misses \
   ./build/simd_bench --size 512 --iterations 5
 ```
-
-## Weekend experiment plan
-
-- **Friday evening:** build, run correctness tests, and establish naive timings.
-- **Saturday:** compare loop orders, run the cache simulator, and record several
-  sizes in CSV.
-- **Sunday:** inspect the AVX2 kernel, measure SIMD-only speedup, try a block size
-  or transposed `B`, and write down where scaling changes.
 
 ## Project layout
 
