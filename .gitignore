@@ -1,0 +1,8 @@
+build/
+out/
+work/
+*.csv
+__pycache__/
+*.py[cod]
+.vs/
+.vscode/
