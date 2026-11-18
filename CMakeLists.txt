@@ -11,6 +11,7 @@ add_library(simd_kernels
     src/matmul_naive.c
     src/matmul_scalar.c
     src/matmul_avx2.c
+    src/matmul_blocked_avx2.c
     src/cpu_features.c
 )
 target_include_directories(simd_kernels PUBLIC include)
@@ -18,14 +19,22 @@ target_include_directories(simd_kernels PUBLIC include)
 if(MSVC)
     target_compile_options(simd_kernels PRIVATE /W4)
     set_source_files_properties(src/matmul_scalar.c PROPERTIES COMPILE_OPTIONS "/Qvec-")
-    set_source_files_properties(src/matmul_avx2.c PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+    set_source_files_properties(
+        src/matmul_avx2.c
+        src/matmul_blocked_avx2.c
+        PROPERTIES COMPILE_OPTIONS "/arch:AVX2"
+    )
     if(SIMD_WARNINGS_AS_ERRORS)
         target_compile_options(simd_kernels PRIVATE /WX)
     endif()
 else()
     target_compile_options(simd_kernels PRIVATE -Wall -Wextra -Wpedantic)
     set_source_files_properties(src/matmul_scalar.c PROPERTIES COMPILE_OPTIONS "-fno-tree-vectorize")
-    set_source_files_properties(src/matmul_avx2.c PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
+    set_source_files_properties(
+        src/matmul_avx2.c
+        src/matmul_blocked_avx2.c
+        PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma"
+    )
     if(SIMD_WARNINGS_AS_ERRORS)
         target_compile_options(simd_kernels PRIVATE -Werror)
     endif()

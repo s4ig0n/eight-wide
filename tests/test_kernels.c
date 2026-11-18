@@ -53,6 +53,21 @@ static int check_size(size_t n) {
             free(a); free(b); free(expected); free(actual);
             return 0;
         }
+
+        max_error = 0.0f;
+        matmul_blocked_avx2(a, b, actual, n);
+        for (i = 0; i < count; ++i) {
+            const float error = fabsf(actual[i] - expected[i]);
+            if (error > max_error) {
+                max_error = error;
+            }
+        }
+        if (max_error > 1.0e-4f * (float)n) {
+            fprintf(stderr, "blocked AVX2 failed for n=%zu: max error %.9g\n",
+                    n, (double)max_error);
+            free(a); free(b); free(expected); free(actual);
+            return 0;
+        }
     }
 
     free(a);

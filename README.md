@@ -1,7 +1,7 @@
 # SIMD Weekend: Cache-Friendly SGEMM
 
 A small, measurable C performance project that multiplies square, row-major
-single-precision matrices (`C = A x B`) three ways:
+single-precision matrices (`C = A x B`) four ways:
 
 1. **naive-ijk** — the obvious scalar triple loop; column walks through `B`
    have poor spatial locality.
@@ -9,10 +9,13 @@ single-precision matrices (`C = A x B`) three ways:
    compiler's auto-vectorizer is disabled for this file.
 3. **avx2-fma-ikj** — the same `ikj` access pattern using eight-wide AVX2
    vectors and fused multiply-add instructions.
+4. **avx2-blocked** — the AVX2/FMA kernel tiled in 128 x 128 x 128 blocks so
+   working rows of `B` and `C` are reused before they leave the smaller caches.
 
-This split makes two effects visible: `naive-ijk` versus `scalar-ikj` isolates
-cache locality, while `scalar-ikj` versus `avx2-fma-ikj` isolates explicit SIMD.
-Odd matrix sizes are supported by a scalar tail.
+This split makes three effects visible: `naive-ijk` versus `scalar-ikj`
+isolates loop-order locality, `scalar-ikj` versus `avx2-fma-ikj` isolates
+explicit SIMD, and `avx2-fma-ikj` versus `avx2-blocked` isolates tiling. Odd
+matrix sizes are supported by a scalar tail.
 
 ## Build and test
 
@@ -45,7 +48,9 @@ kernel             time-ms    GFLOP/s     vs-naive    max-error
 naive-ijk           ...         ...          1.00x            0
 scalar-ikj          ...         ...           ...x          ...
 avx2-fma-ikj        ...         ...           ...x          ...
+avx2-blocked         ...         ...           ...x          ...
 SIMD-only speedup (same ikj access pattern): ...x
+Blocking gain over unblocked AVX2: ...x
 ```
 
 Use a Release build, close noisy applications, and compare several matrix
@@ -63,16 +68,16 @@ Release build measured on an Intel64 Family 6 Model 154 host with Clang 20.1.2
 on 2026-11-18. Each entry is the best of five runs except N=1024 (best of
 three); results will vary with CPU frequency, thermals, and background load.
 
-| N | naive-ijk | scalar-ikj | AVX2/FMA | total speedup | SIMD-only speedup |
-|---:|---:|---:|---:|---:|---:|
-| 256 | 2.26 GFLOP/s | 5.88 GFLOP/s | 21.38 GFLOP/s | 9.47x | 3.64x |
-| 512 | 1.60 GFLOP/s | 6.10 GFLOP/s | 24.26 GFLOP/s | 15.12x | 3.98x |
-| 1024 | 0.43 GFLOP/s | 2.73 GFLOP/s | 9.22 GFLOP/s | 21.55x | 3.38x |
+| N | naive-ijk | scalar-ikj | AVX2/FMA | blocked AVX2 | total speedup | blocking gain |
+|---:|---:|---:|---:|---:|---:|---:|
+| 256 | 2.26 GFLOP/s | 5.55 GFLOP/s | 24.84 GFLOP/s | 30.61 GFLOP/s | 13.53x | 1.23x |
+| 512 | 1.64 GFLOP/s | 6.09 GFLOP/s | 23.48 GFLOP/s | 29.15 GFLOP/s | 17.79x | 1.24x |
+| 1024 | 0.37 GFLOP/s | 2.89 GFLOP/s | 7.88 GFLOP/s | 9.82 GFLOP/s | 26.86x | 1.25x |
 
-The 512 case is the clearest summary: loop order alone supplies a 3.80x gain,
-then explicit AVX2/FMA adds another 3.98x with the same memory access pattern.
-At N=1024, all implementations slow as the working set moves beyond the
-smaller caches, but the strided naive kernel degrades much more sharply.
+The 512 case is the clearest summary: loop order supplies a 3.72x gain,
+explicit AVX2/FMA adds another 3.86x with the same access pattern, and tiling
+adds 1.24x by reusing 128-row panels. At N=1024, the working set moves beyond
+the smaller caches and the strided naive kernel degrades most sharply.
 
 ## Cache simulation
 
@@ -117,6 +122,7 @@ include/simd_matmul.h   public kernel API
 src/matmul_naive.c     plain ijk implementation
 src/matmul_scalar.c    scalar cache-friendly implementation
 src/matmul_avx2.c      AVX2/FMA implementation
+src/matmul_blocked_avx2.c  cache-blocked AVX2/FMA implementation
 src/benchmark.c        timing, validation, CSV output
 tools/cache_sim.py     two-level set-associative cache model
 tests/                 native correctness and simulator tests

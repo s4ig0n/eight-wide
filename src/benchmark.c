@@ -150,7 +150,7 @@ int main(int argc, char **argv) {
     float *c;
     float *reference;
     uint32_t seed = 0x12345678u;
-    result_t results[3];
+    result_t results[4];
     size_t result_count = 0;
     size_t i;
     FILE *csv = NULL;
@@ -205,6 +205,8 @@ int main(int argc, char **argv) {
     if (simd_avx2_fma_supported()) {
         results[result_count++] = run_kernel("avx2-fma-ikj", matmul_avx2, a, b, c,
                                              reference, n, iterations);
+        results[result_count++] = run_kernel("avx2-blocked", matmul_blocked_avx2,
+                                             a, b, c, reference, n, iterations);
     }
 
     printf("SGEMM: C = A x B, N=%zu, best of %zu timed runs\n", n, iterations);
@@ -218,11 +220,13 @@ int main(int argc, char **argv) {
                results[0].seconds / results[i].seconds,
                (double)results[i].max_error);
     }
-    if (result_count < 3) {
-        printf("AVX2/FMA kernel skipped: CPU or OS support was not detected.\n");
+    if (result_count < 4) {
+        printf("AVX2/FMA kernels skipped: CPU or OS support was not detected.\n");
     } else {
         printf("SIMD-only speedup (same ikj access pattern): %.2fx\n",
                results[1].seconds / results[2].seconds);
+        printf("Blocking gain over unblocked AVX2: %.2fx\n",
+               results[2].seconds / results[3].seconds);
     }
     printf("checksum: %.9g\n", results[result_count - 1].checksum);
 
